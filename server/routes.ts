@@ -224,9 +224,11 @@ async function processWatermarkRemoval(job: VideoJob): Promise<void> {
 
     let duration = 0;
     let currentTime = 0;
+    let ffmpegOutput = "";
 
     ffmpeg.stderr.on("data", async (data: Buffer) => {
       const output = data.toString();
+      ffmpegOutput += output;
 
       const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
       if (durationMatch) {
@@ -253,6 +255,7 @@ async function processWatermarkRemoval(job: VideoJob): Promise<void> {
         await storage.updateVideoJobStatus(job.id, "complete", 100);
         resolve();
       } else {
+        console.error("FFmpeg error output:", ffmpegOutput);
         await storage.updateVideoJobError(job.id, "Processing failed. Please try again.");
         reject(new Error("FFmpeg processing failed"));
       }
