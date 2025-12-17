@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type VideoJob, type InsertVideoJob, type JobStatus } from "@shared/schema";
+import { type User, type InsertUser, type VideoJob, type InsertVideoJob, type JobStatus, type WatermarkKeyframe, type InsertKeyframe } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -13,15 +13,24 @@ export interface IStorage {
   updateVideoJobProcessedPath(id: string, processedPath: string): Promise<VideoJob | undefined>;
   updateVideoJobError(id: string, errorMessage: string): Promise<VideoJob | undefined>;
   deleteVideoJob(id: string): Promise<boolean>;
+  
+  // Keyframe operations
+  createKeyframe(keyframe: InsertKeyframe): Promise<WatermarkKeyframe>;
+  getKeyframesForJob(jobId: string): Promise<WatermarkKeyframe[]>;
+  updateKeyframe(id: string, keyframe: Partial<InsertKeyframe>): Promise<WatermarkKeyframe | undefined>;
+  deleteKeyframe(id: string): Promise<boolean>;
+  deleteKeyframesForJob(jobId: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private videoJobs: Map<string, VideoJob>;
+  private keyframes: Map<string, WatermarkKeyframe>;
 
   constructor() {
     this.users = new Map();
     this.videoJobs = new Map();
+    this.keyframes = new Map();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -103,7 +112,60 @@ export class MemStorage implements IStorage {
   }
 
   async deleteVideoJob(id: string): Promise<boolean> {
+    // Also delete associated keyframes
+    await this.deleteKeyframesForJob(id);
     return this.videoJobs.delete(id);
+  }
+
+  async createKeyframe(keyframe: InsertKeyframe): Promise<WatermarkKeyframe> {
+    const id = randomUUID();
+    const newKeyframe: WatermarkKeyframe = {
+      id,
+      jobId: keyframe.jobId,
+      startTime: keyframe.startTime,
+      endTime: keyframe.endTime,
+      x: keyframe.x,
+      y: keyframe.y,
+      width: keyframe.width,
+      height: keyframe.height,
+    };
+    this.keyframes.set(id, newKeyframe);
+    return newKeyframe;
+  }
+
+  async getKeyframesForJob(jobId: string): Promise<WatermarkKeyframe[]> {
+    return Array.from(this.keyframes.values())
+      .filter(kf => kf.jobId === jobId)
+      .sort((a, b) => a.startTime - b.startTime);
+  }
+
+  async updateKeyframe(id: string, updates: Partial<InsertKeyframe>): Promise<WatermarkKeyframe | undefined> {
+    const keyframe = this.keyframes.get(id);
+    if (!keyframe) return undefined;
+    
+    const updated: WatermarkKeyframe = {
+      ...keyframe,
+      ...updates,
+      id: keyframe.id,
+      jobId: keyframe.jobId,
+    };
+    this.keyframes.set(id, updated);
+    return updated;
+  }
+
+  async deleteKeyframe(id: string): Promise<boolean> {
+    return this.keyframes.delete(id);
+  }
+
+  async deleteKeyframesForJob(jobId: string): Promise<boolean> {
+    const toDelete = Array.from(this.keyframes.values())
+      .filter(kf => kf.jobId === jobId)
+      .map(kf => kf.id);
+    
+    for (const id of toDelete) {
+      this.keyframes.delete(id);
+    }
+    return true;
   }
 }
 

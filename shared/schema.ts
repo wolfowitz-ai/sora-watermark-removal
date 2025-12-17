@@ -43,3 +43,27 @@ export const insertVideoJobSchema = createInsertSchema(videoJobs).omit({
 
 export type InsertVideoJob = z.infer<typeof insertVideoJobSchema>;
 export type VideoJob = typeof videoJobs.$inferSelect;
+
+// Keyframe for manual watermark marking
+export interface WatermarkKeyframe {
+  id: string;
+  jobId: string;
+  startTime: number;  // seconds
+  endTime: number;    // seconds
+  x: number;          // pixels from left
+  y: number;          // pixels from top
+  width: number;      // pixels
+  height: number;     // pixels
+}
+
+export const insertKeyframeSchema = z.object({
+  jobId: z.string(),
+  startTime: z.number().min(0),
+  endTime: z.number().min(0),
+  x: z.number().min(0),
+  y: z.number().min(0),
+  width: z.number().min(10),
+  height: z.number().min(10),
+});
+
+export type InsertKeyframe = z.infer<typeof insertKeyframeSchema>;

@@ -5,7 +5,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { spawn } from "child_process";
-import type { VideoJob } from "@shared/schema";
+import type { VideoJob, WatermarkKeyframe } from "@shared/schema";
+import { insertKeyframeSchema } from "@shared/schema";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const PROCESSED_DIR = path.join(process.cwd(), "processed");
@@ -54,17 +55,41 @@ function processNextInQueue(): void {
   if (!job) return;
   
   activeJobs++;
-  processWatermarkRemoval(job)
-    .catch((err) => {
-      console.error("Processing error:", err);
-    })
-    .finally(() => {
-      activeJobs--;
-      processNextInQueue();
-    });
+  
+  // Check if this job has manual keyframes
+  const keyframes = jobKeyframes.get(job.id);
+  if (keyframes && keyframes.length > 0) {
+    processWithManualKeyframes(job, keyframes)
+      .catch((err) => {
+        console.error("Processing error:", err);
+      })
+      .finally(() => {
+        jobKeyframes.delete(job.id);
+        activeJobs--;
+        processNextInQueue();
+      });
+  } else {
+    processWatermarkRemoval(job)
+      .catch((err) => {
+        console.error("Processing error:", err);
+      })
+      .finally(() => {
+        activeJobs--;
+        processNextInQueue();
+      });
+  }
 }
 
 function queueJob(job: VideoJob): void {
+  processingQueue.push(job);
+  processNextInQueue();
+}
+
+// Store keyframes for jobs being processed with manual keyframes
+const jobKeyframes: Map<string, WatermarkKeyframe[]> = new Map();
+
+function queueJobWithKeyframes(job: VideoJob, keyframes: WatermarkKeyframe[]): void {
+  jobKeyframes.set(job.id, keyframes);
   processingQueue.push(job);
   processNextInQueue();
 }
@@ -298,6 +323,97 @@ async function processWatermarkRemoval(job: VideoJob): Promise<void> {
   });
 }
 
+async function processWithManualKeyframes(job: VideoJob, keyframes: WatermarkKeyframe[]): Promise<void> {
+  const inputPath = job.originalPath;
+  const outputFilename = `processed-${path.basename(inputPath)}`;
+  const outputPath = path.join(PROCESSED_DIR, outputFilename);
+
+  if (!fs.existsSync(inputPath)) {
+    await storage.updateVideoJobError(job.id, "Source file not found");
+    throw new Error("Source file not found");
+  }
+
+  await storage.updateVideoJobStatus(job.id, "processing", 5);
+
+  console.log(`Processing with ${keyframes.length} manual keyframe(s)`);
+
+  // Build filter chain from keyframes with time-based enable
+  const filters: string[] = [];
+  
+  for (const kf of keyframes) {
+    // Ensure coordinates are valid (at least 1 pixel from edge)
+    const x = Math.max(1, kf.x);
+    const y = Math.max(1, kf.y);
+    const w = Math.max(20, kf.width);
+    const h = Math.max(10, kf.height);
+    
+    // Use time-based enable for each keyframe
+    const enableExpr = `enable='between(t,${kf.startTime.toFixed(2)},${kf.endTime.toFixed(2)})'`;
+    filters.push(`delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0:${enableExpr}`);
+    
+    console.log(`Keyframe: x=${x}, y=${y}, w=${w}, h=${h}, time=${kf.startTime.toFixed(2)}-${kf.endTime.toFixed(2)}`);
+  }
+
+  const videoFilter = filters.join(",");
+  console.log("Applying manual keyframe filter:", videoFilter);
+  
+  await storage.updateVideoJobStatus(job.id, "processing", 10);
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn("ffmpeg", [
+      "-i", inputPath,
+      "-vf", videoFilter,
+      "-c:a", "copy",
+      "-y",
+      outputPath,
+    ]);
+
+    let duration = 0;
+    let currentTime = 0;
+    let ffmpegOutput = "";
+
+    ffmpeg.stderr.on("data", async (data: Buffer) => {
+      const output = data.toString();
+      ffmpegOutput += output;
+
+      const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2})/);
+      if (durationMatch) {
+        const hours = parseInt(durationMatch[1]);
+        const minutes = parseInt(durationMatch[2]);
+        const seconds = parseInt(durationMatch[3]);
+        duration = hours * 3600 + minutes * 60 + seconds;
+      }
+
+      const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})/);
+      if (timeMatch && duration > 0) {
+        const hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        const seconds = parseInt(timeMatch[3]);
+        currentTime = hours * 3600 + minutes * 60 + seconds;
+        const progress = 10 + Math.min(Math.round((currentTime / duration) * 89), 89);
+        await storage.updateVideoJobStatus(job.id, "processing", progress);
+      }
+    });
+
+    ffmpeg.on("close", async (code) => {
+      if (code === 0) {
+        await storage.updateVideoJobProcessedPath(job.id, outputPath);
+        await storage.updateVideoJobStatus(job.id, "complete", 100);
+        resolve();
+      } else {
+        console.error("FFmpeg error output:", ffmpegOutput);
+        await storage.updateVideoJobError(job.id, "Processing failed. Please try again.");
+        reject(new Error("FFmpeg processing failed"));
+      }
+    });
+
+    ffmpeg.on("error", async (err) => {
+      await storage.updateVideoJobError(job.id, "FFmpeg not available or failed to start");
+      reject(err);
+    });
+  });
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -414,6 +530,136 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Retry error:", error);
       res.status(500).json({ error: "Failed to retry job" });
+    }
+  });
+
+  // Serve uploaded video for preview
+  app.get("/api/jobs/:id/video", async (req: Request, res: Response) => {
+    try {
+      const job = await storage.getVideoJob(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      if (!fs.existsSync(job.originalPath)) {
+        return res.status(404).json({ error: "Video file not found" });
+      }
+
+      const stat = fs.statSync(job.originalPath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        const file = fs.createReadStream(job.originalPath, { start, end });
+        const head = {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': 'video/mp4',
+        };
+        res.writeHead(206, head);
+        file.pipe(res);
+      } else {
+        const head = {
+          'Content-Length': fileSize,
+          'Content-Type': 'video/mp4',
+        };
+        res.writeHead(200, head);
+        fs.createReadStream(job.originalPath).pipe(res);
+      }
+    } catch (error) {
+      console.error("Video stream error:", error);
+      res.status(500).json({ error: "Failed to stream video" });
+    }
+  });
+
+  // Keyframe CRUD routes
+  app.get("/api/jobs/:id/keyframes", async (req: Request, res: Response) => {
+    try {
+      const keyframes = await storage.getKeyframesForJob(req.params.id);
+      res.json(keyframes);
+    } catch (error) {
+      console.error("Get keyframes error:", error);
+      res.status(500).json({ error: "Failed to get keyframes" });
+    }
+  });
+
+  app.post("/api/jobs/:id/keyframes", async (req: Request, res: Response) => {
+    try {
+      const job = await storage.getVideoJob(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      const parsed = insertKeyframeSchema.safeParse({
+        ...req.body,
+        jobId: req.params.id,
+      });
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid keyframe data", details: parsed.error.errors });
+      }
+
+      const keyframe = await storage.createKeyframe(parsed.data);
+      res.status(201).json(keyframe);
+    } catch (error) {
+      console.error("Create keyframe error:", error);
+      res.status(500).json({ error: "Failed to create keyframe" });
+    }
+  });
+
+  app.put("/api/keyframes/:id", async (req: Request, res: Response) => {
+    try {
+      const keyframe = await storage.updateKeyframe(req.params.id, req.body);
+      if (!keyframe) {
+        return res.status(404).json({ error: "Keyframe not found" });
+      }
+      res.json(keyframe);
+    } catch (error) {
+      console.error("Update keyframe error:", error);
+      res.status(500).json({ error: "Failed to update keyframe" });
+    }
+  });
+
+  app.delete("/api/keyframes/:id", async (req: Request, res: Response) => {
+    try {
+      const success = await storage.deleteKeyframe(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Keyframe not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete keyframe error:", error);
+      res.status(500).json({ error: "Failed to delete keyframe" });
+    }
+  });
+
+  // Process with manual keyframes
+  app.post("/api/jobs/:id/process", async (req: Request, res: Response) => {
+    try {
+      const job = await storage.getVideoJob(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      const keyframes = await storage.getKeyframesForJob(req.params.id);
+      if (keyframes.length === 0) {
+        return res.status(400).json({ error: "No keyframes defined. Please mark the watermark regions first." });
+      }
+
+      await storage.updateVideoJobStatus(job.id, "uploading", 0);
+      
+      // Queue with manual keyframes
+      queueJobWithKeyframes(job, keyframes);
+
+      const updatedJob = await storage.getVideoJob(job.id);
+      res.json(updatedJob);
+    } catch (error) {
+      console.error("Process error:", error);
+      res.status(500).json({ error: "Failed to start processing" });
     }
   });
 
