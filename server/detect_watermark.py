@@ -52,18 +52,18 @@ def extract_frames(video_path: str, sample_interval: float = 0.5) -> Tuple[List,
     return frames, timestamps, (width, height), duration
 
 
-def detect_white_overlay_regions(frame: np.ndarray, top_ratio: float = 0.35) -> List[Dict]:
+def detect_white_overlay_regions(frame: np.ndarray) -> List[Dict]:
     """
-    Detect semi-transparent white overlay regions in the top portion of frame.
+    Detect semi-transparent white overlay regions across the entire frame.
     
     Sora watermarks are near-white with low saturation and high value.
     We use HSV color space to isolate these pixels.
     """
     height, width = frame.shape[:2]
     
-    # Only analyze top portion of frame where Sora watermarks appear
-    top_height = int(height * top_ratio)
-    top_region = frame[0:top_height, :]
+    # Analyze the full frame for watermarks at any position
+    top_region = frame
+    top_height = height
     
     # Convert to HSV for better color isolation
     hsv = cv2.cvtColor(top_region, cv2.COLOR_BGR2HSV)
@@ -121,13 +121,20 @@ def detect_white_overlay_regions(frame: np.ndarray, top_ratio: float = 0.35) -> 
                 padding_x = int(w * 0.3)
                 padding_y = int(h * 0.5)
                 
-                regions.append({
-                    'x': max(0, x - padding_x),
-                    'y': max(0, y - padding_y),  # Already in top region coords
-                    'w': min(width, w + 2 * padding_x),
-                    'h': min(top_height, h + 2 * padding_y),
-                    'confidence': min(1.0, area / min_area / 10)
-                })
+                # Ensure coordinates are at least 1 (FFmpeg requirement)
+                reg_x = max(1, x - padding_x)
+                reg_y = max(1, y - padding_y)
+                reg_w = min(width - reg_x - 2, w + 2 * padding_x)
+                reg_h = min(top_height - reg_y - 2, h + 2 * padding_y)
+                
+                if reg_w > 10 and reg_h > 10:
+                    regions.append({
+                        'x': reg_x,
+                        'y': reg_y,
+                        'w': reg_w,
+                        'h': reg_h,
+                        'confidence': min(1.0, area / min_area / 10)
+                    })
     
     return regions
 
@@ -148,16 +155,17 @@ def find_persistent_watermark(frames: List, timestamps: List, video_size: Tuple,
         all_detections.extend(regions)
     
     if not all_detections:
-        # No detections - return a default top-center position for Sora videos
+        # No detections - return a default center position
+        # FFmpeg requires x,y to be at least 1
         return {
             'found': False,
             'fallback': True,
-            'x': int(width * 0.1),
-            'y': 5,
-            'w': int(width * 0.8),
-            'h': int(height * 0.12),
+            'x': max(1, int(width * 0.1)),
+            'y': max(1, int(height * 0.1)),
+            'w': min(int(width * 0.8), width - 3),
+            'h': min(int(height * 0.15), height - 3),
             'confidence': 0.3,
-            'method': 'fallback_top_center'
+            'method': 'fallback_center'
         }
     
     # Cluster detections by position to find persistent watermarks
@@ -220,16 +228,16 @@ def find_persistent_watermark(frames: List, timestamps: List, video_size: Tuple,
                 'method': 'color_opacity_detection'
             }
     
-    # Fallback to default top position
+    # Fallback to default center position
     return {
         'found': False,
         'fallback': True,
-        'x': int(width * 0.1),
-        'y': 5,
-        'w': int(width * 0.8),
-        'h': int(height * 0.12),
+        'x': max(1, int(width * 0.1)),
+        'y': max(1, int(height * 0.1)),
+        'w': min(int(width * 0.8), width - 3),
+        'h': min(int(height * 0.15), height - 3),
         'confidence': 0.3,
-        'method': 'fallback_top_center'
+        'method': 'fallback_center'
     }
 
 

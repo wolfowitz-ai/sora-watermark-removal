@@ -126,8 +126,9 @@ async function detectWatermarkPositions(videoPath: string): Promise<DetectionRes
 }
 
 function validateAndClampSegment(seg: WatermarkSegment, videoWidth?: number, videoHeight?: number): WatermarkSegment | null {
-  let x = Math.max(0, Math.round(seg.x));
-  let y = Math.max(0, Math.round(seg.y));
+  // FFmpeg delogo requires x,y to be at least 1 (not touching edge)
+  let x = Math.max(1, Math.round(seg.x));
+  let y = Math.max(1, Math.round(seg.y));
   let w = Math.round(seg.w);
   let h = Math.round(seg.h);
   
@@ -178,8 +179,9 @@ function buildDynamicDelogoFilter(segments: WatermarkSegment[], duration: number
   }
   
   // Expand the bounding box slightly to cover minor movements
-  let x = Math.max(0, bestSegment.x - 20);
-  let y = Math.max(0, bestSegment.y - 10);
+  // FFmpeg delogo requires x,y to be at least 1 (not touching edge)
+  let x = Math.max(1, bestSegment.x - 20);
+  let y = Math.max(1, bestSegment.y - 10);
   let w = bestSegment.w + 40;
   let h = bestSegment.h + 20;
   
