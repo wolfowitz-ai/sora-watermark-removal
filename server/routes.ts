@@ -436,8 +436,6 @@ export async function registerRoutes(
 
       await storage.updateVideoJobStatus(job.id, "uploading", 100);
 
-      queueJob(job);
-
       res.json(job);
     } catch (error) {
       console.error("Upload error:", error);

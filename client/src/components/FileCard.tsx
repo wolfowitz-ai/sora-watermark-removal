@@ -1,4 +1,4 @@
-import { CheckCircle, Download, Loader2, XCircle, X, RefreshCw, Video } from "lucide-react";
+import { CheckCircle, Download, Loader2, XCircle, X, RefreshCw, Video, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -21,6 +21,7 @@ interface FileCardProps {
   onDownload?: (id: string) => void;
   onCancel?: (id: string) => void;
   onRetry?: (id: string) => void;
+  onEdit?: (id: string) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -44,9 +45,12 @@ function getStatusIcon(status: FileStatus) {
 function getStatusText(status: FileStatus, progress: number): string {
   switch (status) {
     case "uploading":
+      if (progress >= 100) {
+        return "Ready to edit - mark watermark regions";
+      }
       return `Uploading... ${progress}%`;
     case "processing":
-      return `Processing... ${progress}%`;
+      return `Removing watermarks... ${progress}%`;
     case "complete":
       return "Ready to download";
     case "error":
@@ -54,8 +58,9 @@ function getStatusText(status: FileStatus, progress: number): string {
   }
 }
 
-export default function FileCard({ file, onDownload, onCancel, onRetry }: FileCardProps) {
+export default function FileCard({ file, onDownload, onCancel, onRetry, onEdit }: FileCardProps) {
   const isProcessing = file.status === "uploading" || file.status === "processing";
+  const canEdit = file.status !== "processing";
 
   return (
     <Card className="p-4" data-testid={`card-file-${file.id}`}>
@@ -81,6 +86,17 @@ export default function FileCard({ file, onDownload, onCancel, onRetry }: FileCa
             </div>
             
             <div className="flex items-center gap-1 flex-shrink-0">
+              {canEdit && onEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onEdit(file.id)}
+                  data-testid={`button-edit-${file.id}`}
+                >
+                  <Pencil className="w-4 h-4 mr-1" />
+                  Edit Regions
+                </Button>
+              )}
               {file.status === "complete" && onDownload && (
                 <Button
                   size="sm"

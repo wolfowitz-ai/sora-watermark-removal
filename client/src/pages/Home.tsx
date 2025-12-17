@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import UploadDropzone from "@/components/UploadDropzone";
 import FileCard, { type FileItem } from "@/components/FileCard";
 import EmptyState from "@/components/EmptyState";
+import VideoEditor from "@/components/VideoEditor";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { VideoJob } from "@shared/schema";
@@ -23,6 +24,7 @@ function mapJobToFileItem(job: VideoJob): FileItem {
 export default function Home() {
   const { toast } = useToast();
   const [uploadingFiles, setUploadingFiles] = useState<Map<string, number>>(new Map());
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
 
   const { data: jobs = [], isLoading } = useQuery<VideoJob[]>({
     queryKey: ["/api/jobs"],
@@ -108,12 +110,31 @@ export default function Home() {
     retryMutation.mutate(id);
   }, [retryMutation]);
 
+  const handleEdit = useCallback((id: string) => {
+    setEditingJobId(id);
+  }, []);
+
   const scrollToDropzone = useCallback(() => {
     document.getElementById("dropzone-upload")?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
   const fileItems: FileItem[] = jobs.map(mapJobToFileItem);
   const hasFiles = fileItems.length > 0;
+  const editingJob = jobs.find(j => j.id === editingJobId);
+
+  if (editingJobId && editingJob) {
+    return (
+      <VideoEditor
+        jobId={editingJobId}
+        videoSrc={`/api/jobs/${editingJobId}/video`}
+        onClose={() => setEditingJobId(null)}
+        onProcessStart={() => {
+          setEditingJobId(null);
+          toast({ title: "Processing started", description: "Your video is now being processed" });
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -151,6 +172,7 @@ export default function Home() {
                   onDownload={handleDownload}
                   onCancel={handleCancel}
                   onRetry={handleRetry}
+                  onEdit={handleEdit}
                 />
               ))}
             </div>
