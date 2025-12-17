@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -13,7 +14,10 @@ import {
   Trash2, 
   Check, 
   X,
-  ChevronLeft
+  ChevronLeft,
+  ZoomIn,
+  ZoomOut,
+  Pencil
 } from "lucide-react";
 import type { WatermarkKeyframe } from "@shared/schema";
 
@@ -44,6 +48,10 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
   const [drawingRect, setDrawingRect] = useState<DrawingRect | null>(null);
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
+  
+  const [zoom, setZoom] = useState(1);
+  const [editingKeyframeId, setEditingKeyframeId] = useState<string | null>(null);
+  const [editTimes, setEditTimes] = useState({ start: "", end: "" });
   
   const [pendingKeyframe, setPendingKeyframe] = useState<{
     x: number;
@@ -81,6 +89,20 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to delete keyframe", variant: "destructive" });
+    },
+  });
+
+  const updateKeyframeMutation = useMutation({
+    mutationFn: async ({ id, startTime, endTime }: { id: string; startTime: number; endTime: number }) => {
+      return await apiRequest("PUT", `/api/keyframes/${id}`, { startTime, endTime });
+    },
+    onSuccess: () => {
+      refetchKeyframes();
+      setEditingKeyframeId(null);
+      toast({ title: "Keyframe updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update keyframe", variant: "destructive" });
     },
   });
 
@@ -152,6 +174,10 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
     return { x: videoX * scaleX, y: videoY * scaleY };
   }, [displaySize, videoSize]);
 
+  const handleZoomIn = () => setZoom(z => Math.min(z + 0.5, 4));
+  const handleZoomOut = () => setZoom(z => Math.max(z - 0.5, 1));
+  const handleResetZoom = () => setZoom(1);
+
   const handlePlayPause = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -172,7 +198,9 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
   const getMousePosition = (e: React.MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const x = (e.clientX - rect.left) / zoom;
+    const y = (e.clientY - rect.top) / zoom;
+    return { x, y };
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -201,18 +229,42 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
 
     if (width > 10 && height > 10) {
       const videoCoords = scaleToVideo(minX, minY);
-      const videoSize = scaleToVideo(width, height);
+      const videoDims = scaleToVideo(minX + width, minY + height);
+      const w = videoDims.x - videoCoords.x;
+      const h = videoDims.y - videoCoords.y;
       
       setPendingKeyframe({
         x: Math.max(1, videoCoords.x),
         y: Math.max(1, videoCoords.y),
-        width: Math.max(20, videoSize.x),
-        height: Math.max(10, videoSize.y),
+        width: Math.max(20, w),
+        height: Math.max(10, h),
         startTime: currentTime,
       });
     }
 
     setDrawingRect(null);
+  };
+
+  const startEditingKeyframe = (kf: WatermarkKeyframe) => {
+    setEditingKeyframeId(kf.id);
+    setEditTimes({ start: kf.startTime.toFixed(2), end: kf.endTime.toFixed(2) });
+  };
+
+  const saveEditedKeyframe = () => {
+    if (!editingKeyframeId) return;
+    const startTime = parseFloat(editTimes.start);
+    const endTime = parseFloat(editTimes.end);
+    
+    if (isNaN(startTime) || isNaN(endTime) || startTime < 0 || endTime > duration || startTime >= endTime) {
+      toast({ title: "Invalid times", description: "Please enter valid start and end times", variant: "destructive" });
+      return;
+    }
+    
+    updateKeyframeMutation.mutate({ id: editingKeyframeId, startTime, endTime });
+  };
+
+  const cancelEditingKeyframe = () => {
+    setEditingKeyframeId(null);
   };
 
   const confirmKeyframe = () => {
@@ -253,12 +305,14 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
     keyframes.forEach((kf) => {
       if (currentTime >= kf.startTime && currentTime <= kf.endTime) {
         const displayPos = scaleToDisplay(kf.x, kf.y);
-        const displayDim = scaleToDisplay(kf.width, kf.height);
+        const displayEnd = scaleToDisplay(kf.x + kf.width, kf.y + kf.height);
+        const w = displayEnd.x - displayPos.x;
+        const h = displayEnd.y - displayPos.y;
         
         ctx.strokeStyle = "#22c55e";
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
-        ctx.strokeRect(displayPos.x, displayPos.y, displayDim.x, displayDim.y);
+        ctx.strokeRect(displayPos.x, displayPos.y, w, h);
         ctx.setLineDash([]);
       }
     });
@@ -278,13 +332,15 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
 
     if (pendingKeyframe) {
       const displayPos = scaleToDisplay(pendingKeyframe.x, pendingKeyframe.y);
-      const displayDim = scaleToDisplay(pendingKeyframe.width, pendingKeyframe.height);
+      const displayEnd = scaleToDisplay(pendingKeyframe.x + pendingKeyframe.width, pendingKeyframe.y + pendingKeyframe.height);
+      const w = displayEnd.x - displayPos.x;
+      const h = displayEnd.y - displayPos.y;
 
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 3;
-      ctx.strokeRect(displayPos.x, displayPos.y, displayDim.x, displayDim.y);
+      ctx.strokeRect(displayPos.x, displayPos.y, w, h);
       ctx.fillStyle = "rgba(245, 158, 11, 0.3)";
-      ctx.fillRect(displayPos.x, displayPos.y, displayDim.x, displayDim.y);
+      ctx.fillRect(displayPos.x, displayPos.y, w, h);
     }
   }, [displaySize, keyframes, currentTime, drawingRect, pendingKeyframe, scaleToDisplay]);
 
@@ -314,8 +370,15 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
       </header>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 flex items-center justify-center p-4 bg-muted/50">
-          <div ref={containerRef} className="relative max-w-full max-h-full">
+        <div className="flex-1 flex items-center justify-center p-4 bg-muted/50 overflow-auto">
+          <div 
+            ref={containerRef} 
+            className="relative"
+            style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: "center center",
+            }}
+          >
             <video
               ref={videoRef}
               src={videoSrc}
@@ -354,8 +417,19 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
             <span className="text-sm font-mono text-muted-foreground w-24 text-right" data-testid="text-duration">
               {formatTime(duration)}
             </span>
+            <div className="flex items-center gap-1 border-l pl-4 ml-2">
+              <Button variant="outline" size="icon" onClick={handleZoomOut} disabled={zoom <= 1} data-testid="button-zoom-out">
+                <ZoomOut className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleResetZoom} data-testid="button-zoom-reset">
+                {Math.round(zoom * 100)}%
+              </Button>
+              <Button variant="outline" size="icon" onClick={handleZoomIn} disabled={zoom >= 4} data-testid="button-zoom-in">
+                <ZoomIn className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
-
+          
           {pendingKeyframe && (
             <Card className="p-3 border-amber-500">
               <div className="flex items-center justify-between gap-4">
@@ -387,7 +461,7 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
           )}
 
           {keyframes.length > 0 && (
-            <div className="space-y-2 max-h-32 overflow-y-auto">
+            <div className="space-y-2 max-h-40 overflow-y-auto">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Marked Regions</p>
               {keyframes.map((kf) => (
                 <div
@@ -395,23 +469,80 @@ export default function VideoEditor({ jobId, videoSrc, onClose, onProcessStart }
                   className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted"
                   data-testid={`keyframe-${kf.id}`}
                 >
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="font-mono text-xs">
-                      {formatTime(kf.startTime)} - {formatTime(kf.endTime)}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {kf.width}x{kf.height}px at ({kf.x}, {kf.y})
-                    </span>
+                  {editingKeyframeId === kf.id ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-xs text-muted-foreground">Start:</span>
+                      <Input
+                        type="text"
+                        value={editTimes.start}
+                        onChange={(e) => setEditTimes({ ...editTimes, start: e.target.value })}
+                        className="w-20 h-7 text-xs font-mono"
+                        data-testid={`input-start-time-${kf.id}`}
+                      />
+                      <span className="text-xs text-muted-foreground">End:</span>
+                      <Input
+                        type="text"
+                        value={editTimes.end}
+                        onChange={(e) => setEditTimes({ ...editTimes, end: e.target.value })}
+                        className="w-20 h-7 text-xs font-mono"
+                        data-testid={`input-end-time-${kf.id}`}
+                      />
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {kf.width}x{kf.height}px
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {formatTime(kf.startTime)} - {formatTime(kf.endTime)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {kf.width}x{kf.height}px at ({kf.x}, {kf.y})
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    {editingKeyframeId === kf.id ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={cancelEditingKeyframe}
+                          data-testid={`button-cancel-edit-${kf.id}`}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          onClick={saveEditedKeyframe}
+                          disabled={updateKeyframeMutation.isPending}
+                          data-testid={`button-save-edit-${kf.id}`}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => startEditingKeyframe(kf)}
+                          data-testid={`button-edit-keyframe-${kf.id}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteKeyframeMutation.mutate(kf.id)}
+                          disabled={deleteKeyframeMutation.isPending}
+                          data-testid={`button-delete-keyframe-${kf.id}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => deleteKeyframeMutation.mutate(kf.id)}
-                    disabled={deleteKeyframeMutation.isPending}
-                    data-testid={`button-delete-keyframe-${kf.id}`}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
                 </div>
               ))}
             </div>
