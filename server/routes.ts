@@ -154,7 +154,8 @@ function validateAndClampSegment(seg: WatermarkSegment, videoWidth?: number, vid
 
 function buildDynamicDelogoFilter(segments: WatermarkSegment[], duration: number, videoWidth?: number, videoHeight?: number): string {
   if (!segments || segments.length === 0) {
-    return "delogo=x=10:y=10:w=200:h=50:show=0";
+    // No watermarks detected - return a small, unobtrusive filter
+    return "delogo=x=10:y=10:w=100:h=30:show=0";
   }
 
   const validSegments = segments
@@ -162,44 +163,49 @@ function buildDynamicDelogoFilter(segments: WatermarkSegment[], duration: number
     .filter((seg): seg is WatermarkSegment => seg !== null);
   
   if (validSegments.length === 0) {
-    return "delogo=x=10:y=10:w=200:h=50:show=0";
+    return "delogo=x=10:y=10:w=100:h=30:show=0";
   }
 
-  // Find the most common position region by clustering segments
-  // Use the segment that covers the longest duration as primary
-  let bestSegment = validSegments[0];
-  let maxDuration = 0;
+  // Apply each watermark region as a separate delogo filter
+  // This allows removing multiple watermarks without merging into one big region
+  const filters: string[] = [];
   
   for (const seg of validSegments) {
-    const segDuration = seg.end - seg.start;
-    if (segDuration > maxDuration) {
-      maxDuration = segDuration;
-      bestSegment = seg;
+    // Small padding only - don't expand too much
+    let x = Math.max(1, seg.x - 5);
+    let y = Math.max(1, seg.y - 3);
+    let w = seg.w + 10;
+    let h = seg.h + 6;
+    
+    // Strict size limits - watermarks should be small
+    const maxW = videoWidth ? Math.min(200, videoWidth * 0.6) : 200;
+    const maxH = videoHeight ? Math.min(80, videoHeight * 0.15) : 80;
+    
+    if (w > maxW) w = maxW;
+    if (h > maxH) h = maxH;
+    
+    // Clamp to video bounds
+    if (videoWidth && x + w >= videoWidth) {
+      w = videoWidth - x - 2;
+    }
+    if (videoHeight && y + h >= videoHeight) {
+      h = videoHeight - y - 2;
+    }
+    
+    if (w >= 20 && h >= 10) {
+      console.log(`Adding delogo region: x=${x}, y=${y}, w=${w}, h=${h}`);
+      filters.push(`delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0`);
     }
   }
   
-  // Expand the bounding box slightly to cover minor movements
-  // FFmpeg delogo requires x,y to be at least 1 (not touching edge)
-  let x = Math.max(1, bestSegment.x - 20);
-  let y = Math.max(1, bestSegment.y - 10);
-  let w = bestSegment.w + 40;
-  let h = bestSegment.h + 20;
-  
-  // Clamp to video bounds (must be strictly inside frame)
-  if (videoWidth && x + w >= videoWidth) {
-    w = videoWidth - x - 2;
-  }
-  if (videoHeight && y + h >= videoHeight) {
-    h = videoHeight - y - 2;
+  if (filters.length === 0) {
+    return "delogo=x=10:y=10:w=100:h=30:show=0";
   }
   
-  // Ensure minimum size
-  w = Math.max(w, 20);
-  h = Math.max(h, 20);
+  console.log(`Total ${filters.length} delogo filter(s) (video: ${videoWidth}x${videoHeight})`);
   
-  console.log(`Using best segment: x=${x}, y=${y}, w=${w}, h=${h} (video: ${videoWidth}x${videoHeight})`);
-  
-  return `delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0`;
+  // Chain multiple delogo filters together
+  return filters.join(",");
 }
 
 async function processWatermarkRemoval(job: VideoJob): Promise<void> {

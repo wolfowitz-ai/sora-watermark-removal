@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Sora Watermark Detection - Color and Opacity Based Approach
+Sora Watermark Detection - Strict Size-Limited Approach
 
-Detects Sora watermarks by looking for semi-transparent white/near-white text
-in the top portion of the video frame. Sora watermarks are typically:
-- Near-white color (#f4f4f4 to #ffffff)
-- Semi-transparent (45-65% opacity)
-- Located in top 35% of frame (usually top-center or top-right)
+Detects Sora watermarks by looking for small semi-transparent white/near-white text.
+Key constraints:
+- Watermarks are SMALL (typically ~100-150px wide, ~30-50px tall)
+- Maximum size is strictly limited to prevent over-blurring
+- Uses color/opacity detection with strict size filtering
 """
 
 import cv2
@@ -52,193 +52,131 @@ def extract_frames(video_path: str, sample_interval: float = 0.5) -> Tuple[List,
     return frames, timestamps, (width, height), duration
 
 
-def detect_white_overlay_regions(frame: np.ndarray) -> List[Dict]:
+def detect_watermark_text(frame: np.ndarray) -> List[Dict]:
     """
-    Detect semi-transparent white overlay regions across the entire frame.
-    
-    Sora watermarks are near-white with low saturation and high value.
-    We use HSV color space to isolate these pixels.
+    Detect small semi-transparent text regions that could be watermarks.
+    Uses strict size limits to avoid detecting large bright areas.
     """
     height, width = frame.shape[:2]
     
-    # Analyze the full frame for watermarks at any position
-    top_region = frame
-    top_height = height
+    # Maximum watermark dimensions - Sora watermarks are small
+    max_watermark_w = min(200, int(width * 0.6))  # Max 60% of width or 200px
+    max_watermark_h = min(80, int(height * 0.15))  # Max 15% of height or 80px
+    min_watermark_w = 30  # At least 30px wide
+    min_watermark_h = 10  # At least 10px tall
     
-    # Convert to HSV for better color isolation
-    hsv = cv2.cvtColor(top_region, cv2.COLOR_BGR2HSV)
+    # Convert to HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
-    # Sora watermarks are near-white: low saturation, high value
-    # H: any (white has no hue), S: 0-40 (low saturation), V: 180-255 (high brightness)
-    lower_white = np.array([0, 0, 180])
-    upper_white = np.array([180, 40, 255])
+    # Detect near-white pixels (low saturation, high value)
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([180, 30, 255])
     white_mask = cv2.inRange(hsv, lower_white, upper_white)
     
-    # Also check for slightly gray watermarks (common with opacity blending)
-    lower_gray = np.array([0, 0, 150])
-    upper_gray = np.array([180, 50, 220])
-    gray_mask = cv2.inRange(hsv, lower_gray, upper_gray)
+    # Use edge detection to find text-like structures
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 100, 200)
     
-    combined_mask = cv2.bitwise_or(white_mask, gray_mask)
+    # Combine white mask with edges - watermarks have both
+    combined = cv2.bitwise_and(white_mask, edges)
     
-    # Apply background subtraction to isolate overlay
-    # Blur the original and subtract to find overlaid text
-    blurred = cv2.GaussianBlur(top_region, (51, 51), 0)
-    diff = cv2.absdiff(top_region, blurred)
-    diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    
-    # Threshold the difference to find text-like regions
-    _, diff_thresh = cv2.threshold(diff_gray, 15, 255, cv2.THRESH_BINARY)
-    
-    # Combine color mask with difference detection
-    final_mask = cv2.bitwise_and(combined_mask, diff_thresh)
-    
-    # Apply morphological operations to clean up
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
-    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel)
-    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel)
-    
-    # Dilate to connect nearby text characters
-    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 8))
-    final_mask = cv2.dilate(final_mask, dilate_kernel, iterations=2)
+    # Dilate slightly to connect text characters
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (8, 4))
+    dilated = cv2.dilate(combined, kernel, iterations=1)
     
     # Find contours
-    contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     regions = []
-    min_area = (width * top_height) * 0.001  # Min 0.1% of top region
-    max_area = (width * top_height) * 0.15   # Max 15% of top region
-    
     for contour in contours:
-        area = cv2.contourArea(contour)
-        if min_area < area < max_area:
-            x, y, w, h = cv2.boundingRect(contour)
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # Strict size filtering
+        if w < min_watermark_w or h < min_watermark_h:
+            continue
+        if w > max_watermark_w or h > max_watermark_h:
+            continue
             
-            # Watermark text should be wider than tall (aspect ratio check)
-            aspect_ratio = w / h if h > 0 else 0
-            if aspect_ratio > 1.5 and aspect_ratio < 15:  # Text-like proportions
-                # Add padding
-                padding_x = int(w * 0.3)
-                padding_y = int(h * 0.5)
-                
-                # Ensure coordinates are at least 1 (FFmpeg requirement)
-                reg_x = max(1, x - padding_x)
-                reg_y = max(1, y - padding_y)
-                reg_w = min(width - reg_x - 2, w + 2 * padding_x)
-                reg_h = min(top_height - reg_y - 2, h + 2 * padding_y)
-                
-                if reg_w > 10 and reg_h > 10:
-                    regions.append({
-                        'x': reg_x,
-                        'y': reg_y,
-                        'w': reg_w,
-                        'h': reg_h,
-                        'confidence': min(1.0, area / min_area / 10)
-                    })
+        # Aspect ratio check - text is wider than tall
+        aspect_ratio = w / h if h > 0 else 0
+        if aspect_ratio < 1.5 or aspect_ratio > 12:
+            continue
+        
+        # Add small padding
+        padding_x = min(15, int(w * 0.2))
+        padding_y = min(10, int(h * 0.3))
+        
+        reg_x = max(1, x - padding_x)
+        reg_y = max(1, y - padding_y)
+        reg_w = min(width - reg_x - 2, w + 2 * padding_x)
+        reg_h = min(height - reg_y - 2, h + 2 * padding_y)
+        
+        # Final size check after padding
+        if reg_w <= max_watermark_w and reg_h <= max_watermark_h:
+            regions.append({
+                'x': reg_x,
+                'y': reg_y,
+                'w': reg_w,
+                'h': reg_h,
+                'area': w * h
+            })
     
     return regions
 
 
-def find_persistent_watermark(frames: List, timestamps: List, video_size: Tuple, duration: float) -> Dict:
+def find_watermarks(frames: List, timestamps: List, video_size: Tuple, duration: float) -> List[Dict]:
     """
-    Find watermark regions that persist across multiple frames.
-    
-    Watermarks should appear in similar positions across the video.
+    Find all watermark regions across frames.
+    Returns multiple small regions instead of one large merged region.
     """
     width, height = video_size
     all_detections = []
     
     for i, frame in enumerate(frames):
-        regions = detect_white_overlay_regions(frame)
+        regions = detect_watermark_text(frame)
         for region in regions:
             region['timestamp'] = timestamps[i]
         all_detections.extend(regions)
     
     if not all_detections:
-        # No detections - return a default center position
-        # FFmpeg requires x,y to be at least 1
-        return {
-            'found': False,
-            'fallback': True,
-            'x': max(1, int(width * 0.1)),
-            'y': max(1, int(height * 0.1)),
-            'w': min(int(width * 0.8), width - 3),
-            'h': min(int(height * 0.15), height - 3),
-            'confidence': 0.3,
-            'method': 'fallback_center'
-        }
+        return []
     
-    # Cluster detections by position to find persistent watermarks
+    # Group similar detections by position (for tracking moving watermarks)
+    # But DON'T merge them into one big region
     clusters = []
     
     for det in all_detections:
-        merged = False
+        matched = False
         for cluster in clusters:
-            # Check if detection overlaps with cluster center
-            cx, cy, cw, ch = cluster['x'], cluster['y'], cluster['w'], cluster['h']
-            dx, dy, dw, dh = det['x'], det['y'], det['w'], det['h']
+            # Check if detection is close to cluster center
+            cx = cluster['x'] + cluster['w'] / 2
+            cy = cluster['y'] + cluster['h'] / 2
+            dx = det['x'] + det['w'] / 2
+            dy = det['y'] + det['h'] / 2
             
-            # Calculate overlap
-            overlap_x = max(0, min(cx + cw, dx + dw) - max(cx, dx))
-            overlap_y = max(0, min(cy + ch, dy + dh) - max(cy, dy))
-            overlap_area = overlap_x * overlap_y
-            
-            det_area = dw * dh
-            if det_area > 0 and overlap_area / det_area > 0.3:
-                # Merge into cluster - expand bounds
-                new_x = min(cx, dx)
-                new_y = min(cy, dy)
-                new_w = max(cx + cw, dx + dw) - new_x
-                new_h = max(cy + ch, dy + dh) - new_y
-                
-                cluster['x'] = new_x
-                cluster['y'] = new_y
-                cluster['w'] = new_w
-                cluster['h'] = new_h
+            # If centers are close, it's the same watermark
+            if abs(cx - dx) < 50 and abs(cy - dy) < 30:
                 cluster['count'] += 1
-                cluster['confidence'] = max(cluster['confidence'], det['confidence'])
-                merged = True
+                matched = True
                 break
         
-        if not merged:
+        if not matched:
             clusters.append({
                 'x': det['x'],
                 'y': det['y'],
                 'w': det['w'],
                 'h': det['h'],
-                'count': 1,
-                'confidence': det['confidence']
+                'count': 1
             })
     
-    # Find the most persistent cluster (appears in most frames)
-    if clusters:
-        best_cluster = max(clusters, key=lambda c: c['count'] * c['confidence'])
-        
-        # Only use if detected in at least 20% of frames
-        if best_cluster['count'] >= max(2, len(frames) * 0.2):
-            return {
-                'found': True,
-                'fallback': False,
-                'x': best_cluster['x'],
-                'y': best_cluster['y'],
-                'w': best_cluster['w'],
-                'h': best_cluster['h'],
-                'confidence': best_cluster['confidence'],
-                'detections': best_cluster['count'],
-                'method': 'color_opacity_detection'
-            }
+    # Keep only clusters that appear in multiple frames (persistent watermarks)
+    persistent = [c for c in clusters if c['count'] >= max(2, len(frames) * 0.15)]
     
-    # Fallback to default center position
-    return {
-        'found': False,
-        'fallback': True,
-        'x': max(1, int(width * 0.1)),
-        'y': max(1, int(height * 0.1)),
-        'w': min(int(width * 0.8), width - 3),
-        'h': min(int(height * 0.15), height - 3),
-        'confidence': 0.3,
-        'method': 'fallback_center'
-    }
+    # If no persistent clusters, use the most frequent one
+    if not persistent and clusters:
+        persistent = [max(clusters, key=lambda c: c['count'])]
+    
+    return persistent
 
 
 def main():
@@ -253,25 +191,25 @@ def main():
         sys.exit(1)
     
     try:
-        # Extract frames at 0.5 second intervals
         frames, timestamps, video_size, duration = extract_frames(video_path, 0.5)
         
         if len(frames) == 0:
             print(json.dumps({'error': 'No frames extracted from video'}))
             sys.exit(1)
         
-        # Find persistent watermark
-        result = find_persistent_watermark(frames, timestamps, video_size, duration)
+        watermarks = find_watermarks(frames, timestamps, video_size, duration)
         
-        # Create segments for the full video duration
-        segments = [{
-            'x': result['x'],
-            'y': result['y'],
-            'w': result['w'],
-            'h': result['h'],
-            'start': 0,
-            'end': duration
-        }]
+        # Create segments for each detected watermark
+        segments = []
+        for wm in watermarks:
+            segments.append({
+                'x': wm['x'],
+                'y': wm['y'],
+                'w': wm['w'],
+                'h': wm['h'],
+                'start': 0,
+                'end': duration
+            })
         
         output = {
             'success': True,
@@ -280,10 +218,10 @@ def main():
                 'height': video_size[1],
                 'duration': duration
             },
-            'watermark_detected': result['found'],
-            'watermark': result,
+            'watermark_detected': len(segments) > 0,
             'segments': segments,
-            'frames_analyzed': len(frames)
+            'frames_analyzed': len(frames),
+            'watermarks_found': len(segments)
         }
         
         print(json.dumps(output))
