@@ -132,15 +132,15 @@ function validateAndClampSegment(seg: WatermarkSegment, videoWidth?: number, vid
   let h = Math.round(seg.h);
   
   if (videoWidth) {
-    if (x >= videoWidth) return null;
-    if (x + w > videoWidth) {
-      w = videoWidth - x - 1;
+    if (x >= videoWidth - 10) return null;
+    if (x + w >= videoWidth) {
+      w = videoWidth - x - 2;
     }
   }
   if (videoHeight) {
-    if (y >= videoHeight) return null;
-    if (y + h > videoHeight) {
-      h = videoHeight - y - 1;
+    if (y >= videoHeight - 10) return null;
+    if (y + h >= videoHeight) {
+      h = videoHeight - y - 2;
     }
   }
   
@@ -183,12 +183,12 @@ function buildDynamicDelogoFilter(segments: WatermarkSegment[], duration: number
   let w = bestSegment.w + 40;
   let h = bestSegment.h + 20;
   
-  // Clamp to video bounds
-  if (videoWidth && x + w > videoWidth) {
-    w = videoWidth - x - 1;
+  // Clamp to video bounds (must be strictly inside frame)
+  if (videoWidth && x + w >= videoWidth) {
+    w = videoWidth - x - 2;
   }
-  if (videoHeight && y + h > videoHeight) {
-    h = videoHeight - y - 1;
+  if (videoHeight && y + h >= videoHeight) {
+    h = videoHeight - y - 2;
   }
   
   // Ensure minimum size
