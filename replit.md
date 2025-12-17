@@ -12,20 +12,23 @@ Preferred communication style: Simple, everyday language.
 
 **FULLY FUNCTIONAL** - The application is complete with:
 - Drag-and-drop video upload interface
-- Real-time processing status with progress tracking
-- **Dynamic watermark tracking** using OpenCV/Python for moving Sora watermarks
+- **Manual keyframe marking system** for precise watermark region selection
+- Video preview with timeline scrubbing and bounding box drawing
 - FFmpeg-based watermark removal with time-based position segments
+- Real-time processing status with progress tracking
 - Download processed videos
 - Job queue with concurrency limiting (max 2 concurrent jobs)
 - Dark/light mode toggle
 - Error handling with retry functionality
 
-### Watermark Detection System
-The application now uses a Python script (server/detect_watermark.py) with OpenCV to:
-1. Extract frames from uploaded videos at 0.25-second intervals
-2. Detect potential watermark regions using edge detection and MSER text detection
-3. Track watermark movement and create time-based position segments
-4. Generate dynamic FFmpeg delogo filters that follow the watermark across frames
+### Manual Keyframe System
+The application uses a manual keyframe approach for accurate watermark removal:
+1. User uploads video - job goes to "Ready to edit" state
+2. User opens VideoEditor to preview video with timeline controls
+3. User draws bounding boxes on frames where watermark appears
+4. Each keyframe stores: start time, end time, x, y, width, height
+5. Processing generates time-based FFmpeg delogo filters from keyframes
+6. Each keyframe region is removed only during its specified time range
 
 ## System Architecture
 
@@ -48,9 +51,15 @@ The application now uses a Python script (server/detect_watermark.py) with OpenC
 - `POST /api/upload` - Upload video files (accepts MP4, MOV, AVI, WebM up to 500MB)
 - `GET /api/jobs` - List all video processing jobs
 - `GET /api/jobs/:id` - Get specific job status
+- `GET /api/jobs/:id/video` - Stream original video for preview/editing
 - `DELETE /api/jobs/:id` - Cancel/delete a job
 - `GET /api/jobs/:id/download` - Download processed video
 - `POST /api/jobs/:id/retry` - Retry a failed job
+- `GET /api/jobs/:id/keyframes` - Get keyframes for a job
+- `POST /api/jobs/:id/keyframes` - Create a new keyframe
+- `PUT /api/keyframes/:id` - Update a keyframe
+- `DELETE /api/keyframes/:id` - Delete a keyframe
+- `POST /api/jobs/:id/process` - Start processing with manual keyframes
 
 ### Data Storage
 - **Schema**: Drizzle ORM with PostgreSQL dialect (shared/schema.ts)
@@ -60,10 +69,12 @@ The application now uses a Python script (server/detect_watermark.py) with OpenC
 ### Key Components
 - **client/src/components/Header.tsx** - App header with theme toggle
 - **client/src/components/UploadDropzone.tsx** - Drag-and-drop file upload
-- **client/src/components/FileCard.tsx** - Individual job status display
+- **client/src/components/FileCard.tsx** - Individual job status display with edit button
+- **client/src/components/VideoEditor.tsx** - Video preview with keyframe drawing UI
 - **client/src/components/EmptyState.tsx** - Empty queue state
 - **client/src/pages/Home.tsx** - Main page with all functionality
 - **server/routes.ts** - All API endpoints and FFmpeg processing
+- **shared/schema.ts** - Data models including WatermarkKeyframe
 
 ### Key Design Decisions
 
