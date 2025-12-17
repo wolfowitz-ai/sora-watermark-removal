@@ -30,9 +30,13 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-function getStatusIcon(status: FileStatus) {
+function getStatusIcon(status: FileStatus, progress: number) {
   switch (status) {
     case "uploading":
+      if (progress >= 100) {
+        return <Pencil className="w-4 h-4 text-amber-500" />;
+      }
+      return <Loader2 className="w-4 h-4 animate-spin text-primary" />;
     case "processing":
       return <Loader2 className="w-4 h-4 animate-spin text-primary" />;
     case "complete":
@@ -59,8 +63,9 @@ function getStatusText(status: FileStatus, progress: number): string {
 }
 
 export default function FileCard({ file, onDownload, onCancel, onRetry, onEdit }: FileCardProps) {
-  const isProcessing = file.status === "uploading" || file.status === "processing";
-  const canEdit = file.status !== "processing";
+  const isActivelyProcessing = file.status === "processing" || (file.status === "uploading" && file.progress < 100);
+  const isReadyToEdit = file.status === "uploading" && file.progress >= 100;
+  const canEdit = !isActivelyProcessing;
 
   return (
     <Card className="p-4" data-testid={`card-file-${file.id}`}>
@@ -118,7 +123,7 @@ export default function FileCard({ file, onDownload, onCancel, onRetry, onEdit }
                   Retry
                 </Button>
               )}
-              {isProcessing && onCancel && (
+              {isActivelyProcessing && onCancel && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -132,11 +137,11 @@ export default function FileCard({ file, onDownload, onCancel, onRetry, onEdit }
           </div>
           
           <div className="mt-3">
-            {isProcessing && (
+            {isActivelyProcessing && (
               <Progress value={file.progress} className="h-1.5" />
             )}
             <div className="flex items-center gap-2 mt-2">
-              {getStatusIcon(file.status)}
+              {getStatusIcon(file.status, file.progress)}
               <span className={`text-xs ${file.status === "error" ? "text-destructive" : "text-muted-foreground"}`} data-testid={`text-status-${file.id}`}>
                 {file.status === "error" ? file.errorMessage : getStatusText(file.status, file.progress)}
               </span>
