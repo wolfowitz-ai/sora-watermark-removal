@@ -1,97 +1,119 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import UploadDropzone from "@/components/UploadDropzone";
-import FileCard, { type FileItem, type FileStatus } from "@/components/FileCard";
+import FileCard, { type FileItem } from "@/components/FileCard";
 import EmptyState from "@/components/EmptyState";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { VideoJob } from "@shared/schema";
 
-// todo: remove mock functionality - simulated processing
-function simulateProcessing(
-  fileId: string,
-  updateFile: (id: string, updates: Partial<FileItem>) => void
-) {
-  let progress = 0;
-  const uploadInterval = setInterval(() => {
-    progress += Math.random() * 15 + 5;
-    if (progress >= 100) {
-      clearInterval(uploadInterval);
-      updateFile(fileId, { status: "processing", progress: 0 });
-      
-      let processProgress = 0;
-      const processInterval = setInterval(() => {
-        processProgress += Math.random() * 10 + 5;
-        if (processProgress >= 100) {
-          clearInterval(processInterval);
-          updateFile(fileId, { status: "complete", progress: 100 });
-        } else {
-          updateFile(fileId, { progress: Math.min(Math.round(processProgress), 99) });
-        }
-      }, 500);
-    } else {
-      updateFile(fileId, { progress: Math.min(Math.round(progress), 99) });
-    }
-  }, 300);
-
-  return () => {
-    clearInterval(uploadInterval);
+function mapJobToFileItem(job: VideoJob): FileItem {
+  return {
+    id: job.id,
+    name: job.originalFilename,
+    size: job.fileSize,
+    format: job.format,
+    status: job.status,
+    progress: job.progress,
+    errorMessage: job.errorMessage || undefined,
   };
 }
 
 export default function Home() {
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const cancelFns = useRef<Map<string, () => void>>(new Map());
+  const { toast } = useToast();
+  const [uploadingFiles, setUploadingFiles] = useState<Map<string, number>>(new Map());
 
-  const updateFile = useCallback((id: string, updates: Partial<FileItem>) => {
-    setFiles(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
-  }, []);
+  const { data: jobs = [], isLoading } = useQuery<VideoJob[]>({
+    queryKey: ["/api/jobs"],
+    refetchInterval: 2000,
+  });
 
-  const handleFilesSelected = useCallback((newFiles: File[]) => {
-    const fileItems: FileItem[] = newFiles.map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
-      format: file.name.split(".").pop() || "video",
-      status: "uploading" as FileStatus,
-      progress: 0,
-    }));
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("video", file);
+      
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Upload failed");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Upload Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
-    setFiles(prev => [...fileItems, ...prev]);
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/jobs/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to cancel job",
+        variant: "destructive",
+      });
+    },
+  });
 
-    // todo: remove mock functionality - start simulated processing for each file
-    fileItems.forEach((item) => {
-      const cancel = simulateProcessing(item.id, updateFile);
-      cancelFns.current.set(item.id, cancel);
+  const retryMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("POST", `/api/jobs/${id}/retry`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to retry job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFilesSelected = useCallback((files: File[]) => {
+    files.forEach((file) => {
+      uploadMutation.mutate(file);
     });
-  }, [updateFile]);
+  }, [uploadMutation]);
 
   const handleDownload = useCallback((id: string) => {
-    // todo: remove mock functionality
-    console.log("Downloading file:", id);
-    const file = files.find(f => f.id === id);
-    if (file) {
-      alert(`Download started for: ${file.name}\n\nIn production, this would download the processed file without watermark.`);
-    }
-  }, [files]);
-
-  const handleCancel = useCallback((id: string) => {
-    const cancel = cancelFns.current.get(id);
-    if (cancel) {
-      cancel();
-      cancelFns.current.delete(id);
-    }
-    setFiles(prev => prev.filter(f => f.id !== id));
+    window.open(`/api/jobs/${id}/download`, "_blank");
   }, []);
 
+  const handleCancel = useCallback((id: string) => {
+    deleteMutation.mutate(id);
+  }, [deleteMutation]);
+
   const handleRetry = useCallback((id: string) => {
-    updateFile(id, { status: "uploading", progress: 0, errorMessage: undefined });
-    const cancel = simulateProcessing(id, updateFile);
-    cancelFns.current.set(id, cancel);
-  }, [updateFile]);
+    retryMutation.mutate(id);
+  }, [retryMutation]);
 
   const scrollToDropzone = useCallback(() => {
     document.getElementById("dropzone-upload")?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  const hasFiles = files.length > 0;
+  const fileItems: FileItem[] = jobs.map(mapJobToFileItem);
+  const hasFiles = fileItems.length > 0;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -113,12 +135,16 @@ export default function Home() {
             compact={hasFiles}
           />
 
-          {hasFiles ? (
+          {isLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : hasFiles ? (
             <div className="space-y-3">
               <h2 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
-                Processing Queue ({files.length} {files.length === 1 ? "file" : "files"})
+                Processing Queue ({fileItems.length} {fileItems.length === 1 ? "file" : "files"})
               </h2>
-              {files.map((file) => (
+              {fileItems.map((file) => (
                 <FileCard
                   key={file.id}
                   file={file}
