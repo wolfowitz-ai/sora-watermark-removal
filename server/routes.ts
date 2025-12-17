@@ -126,19 +126,25 @@ async function detectWatermarkPositions(videoPath: string): Promise<DetectionRes
 }
 
 function validateAndClampSegment(seg: WatermarkSegment, videoWidth?: number, videoHeight?: number): WatermarkSegment | null {
-  const x = Math.max(0, Math.round(seg.x));
-  const y = Math.max(0, Math.round(seg.y));
+  let x = Math.max(0, Math.round(seg.x));
+  let y = Math.max(0, Math.round(seg.y));
   let w = Math.round(seg.w);
   let h = Math.round(seg.h);
   
-  if (videoWidth && x + w > videoWidth) {
-    w = videoWidth - x;
+  if (videoWidth) {
+    if (x >= videoWidth) return null;
+    if (x + w > videoWidth) {
+      w = videoWidth - x - 1;
+    }
   }
-  if (videoHeight && y + h > videoHeight) {
-    h = videoHeight - y;
+  if (videoHeight) {
+    if (y >= videoHeight) return null;
+    if (y + h > videoHeight) {
+      h = videoHeight - y - 1;
+    }
   }
   
-  if (w < 10 || h < 10 || x < 0 || y < 0) {
+  if (w < 10 || h < 10) {
     return null;
   }
   
@@ -158,24 +164,40 @@ function buildDynamicDelogoFilter(segments: WatermarkSegment[], duration: number
     return "delogo=x=10:y=10:w=200:h=50:show=0";
   }
 
-  if (validSegments.length === 1) {
-    const seg = validSegments[0];
-    return `delogo=x=${seg.x}:y=${seg.y}:w=${seg.w}:h=${seg.h}:show=0`;
-  }
-
-  const filters: string[] = [];
+  // Find the most common position region by clustering segments
+  // Use the segment that covers the longest duration as primary
+  let bestSegment = validSegments[0];
+  let maxDuration = 0;
   
-  for (let i = 0; i < validSegments.length; i++) {
-    const seg = validSegments[i];
-    const start = seg.start;
-    const end = seg.end;
-    
-    filters.push(
-      `delogo=x=${seg.x}:y=${seg.y}:w=${seg.w}:h=${seg.h}:show=0:enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'`
-    );
+  for (const seg of validSegments) {
+    const segDuration = seg.end - seg.start;
+    if (segDuration > maxDuration) {
+      maxDuration = segDuration;
+      bestSegment = seg;
+    }
   }
   
-  return filters.join(",");
+  // Expand the bounding box slightly to cover minor movements
+  let x = Math.max(0, bestSegment.x - 20);
+  let y = Math.max(0, bestSegment.y - 10);
+  let w = bestSegment.w + 40;
+  let h = bestSegment.h + 20;
+  
+  // Clamp to video bounds
+  if (videoWidth && x + w > videoWidth) {
+    w = videoWidth - x - 1;
+  }
+  if (videoHeight && y + h > videoHeight) {
+    h = videoHeight - y - 1;
+  }
+  
+  // Ensure minimum size
+  w = Math.max(w, 20);
+  h = Math.max(h, 20);
+  
+  console.log(`Using best segment: x=${x}, y=${y}, w=${w}, h=${h} (video: ${videoWidth}x${videoHeight})`);
+  
+  return `delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0`;
 }
 
 async function processWatermarkRemoval(job: VideoJob): Promise<void> {
