@@ -13,11 +13,19 @@ Preferred communication style: Simple, everyday language.
 **FULLY FUNCTIONAL** - The application is complete with:
 - Drag-and-drop video upload interface
 - Real-time processing status with progress tracking
-- FFmpeg-based watermark removal (delogo filter)
+- **Dynamic watermark tracking** using OpenCV/Python for moving Sora watermarks
+- FFmpeg-based watermark removal with time-based position segments
 - Download processed videos
 - Job queue with concurrency limiting (max 2 concurrent jobs)
 - Dark/light mode toggle
 - Error handling with retry functionality
+
+### Watermark Detection System
+The application now uses a Python script (server/detect_watermark.py) with OpenCV to:
+1. Extract frames from uploaded videos at 0.25-second intervals
+2. Detect potential watermark regions using edge detection and MSER text detection
+3. Track watermark movement and create time-based position segments
+4. Generate dynamic FFmpeg delogo filters that follow the watermark across frames
 
 ## System Architecture
 
@@ -71,6 +79,7 @@ Preferred communication style: Simple, everyday language.
 
 ### System
 - **FFmpeg**: Required for video processing (installed via Nix)
+- **Python 3.11**: With OpenCV for watermark detection
 
 ### Frontend Libraries
 - **@tanstack/react-query**: Server state management with polling
