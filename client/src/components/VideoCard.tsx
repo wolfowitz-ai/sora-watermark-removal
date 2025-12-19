@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Download, Copy, Check, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Download, Copy, Check, Loader2, Play } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SoraVideo } from "@shared/schema";
 
@@ -38,25 +39,46 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
       className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border"
       data-testid={`card-video-${video.id}`}
     >
-      <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-muted">
-        {!videoError ? (
+      <Dialog>
+        <DialogTrigger asChild>
+          <button 
+            className="relative w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-muted cursor-pointer group"
+            data-testid={`button-preview-${video.id}`}
+          >
+            {!videoError ? (
+              <>
+                <video
+                  src={video.downloadUrl}
+                  className="w-full h-full object-cover"
+                  preload="metadata"
+                  onError={() => setVideoError(true)}
+                  data-testid={`video-thumbnail-${video.id}`}
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Play className="w-6 h-6 text-white" fill="white" />
+                </div>
+              </>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-muted">
+                <span className="text-xs text-muted-foreground">N/A</span>
+              </div>
+            )}
+          </button>
+        </DialogTrigger>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden">
           <video
             src={video.downloadUrl}
-            className="w-full h-full object-cover"
-            preload="metadata"
-            onError={() => setVideoError(true)}
-            data-testid={`video-thumbnail-${video.id}`}
+            className="w-full"
+            controls
+            autoPlay
+            data-testid={`video-fullscreen-${video.id}`}
           />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-muted">
-            <span className="text-xs text-muted-foreground">N/A</span>
-          </div>
-        )}
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex-1 min-w-0 space-y-1">
         <p className="text-xs text-muted-foreground font-mono truncate" data-testid={`text-video-id-${video.id}`}>
-          {video.videoId}
+          ID: {video.videoId}
         </p>
         
         {video.isLoading ? (

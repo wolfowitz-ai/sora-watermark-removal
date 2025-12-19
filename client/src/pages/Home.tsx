@@ -28,6 +28,10 @@ export default function Home() {
     return "";
   };
 
+  const fetchPromptClientSide = async (url: string): Promise<string> => {
+    return "";
+  };
+
   const processUrls = useCallback(async () => {
     const lines = urlInput.split(/[\n\s]+/).filter(line => line.trim());
     const newVideos: SoraVideo[] = [];

@@ -1,5 +1,27 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+puppeteer.use(StealthPlugin());
+
+let browserInstance: any = null;
+
+async function getBrowser() {
+  if (!browserInstance) {
+    browserInstance = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-blink-features=AutomationControlled"
+      ]
+    });
+  }
+  return browserInstance;
+}
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   app.get("/api/health", (req, res) => {
@@ -14,32 +36,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     try {
+      const browser = await getBrowser();
+      const page = await browser.newPage();
+      
+      await page.setViewport({ width: 1280, height: 720 });
+      await page.setUserAgent(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+      );
+
       const soraUrl = `https://sora.chatgpt.com/p/${videoId}`;
-      const response = await fetch(soraUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
-        }
+      
+      await page.goto(soraUrl, { 
+        waitUntil: "networkidle2",
+        timeout: 30000
       });
 
-      if (!response.ok) {
-        return res.status(404).json({ error: "Video not found" });
-      }
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      const html = await response.text();
-      
-      const promptMatch = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i) ||
-                         html.match(/<meta\s+name="description"\s+content="([^"]+)"/i);
-      
+      const html = await page.content();
+      await page.close();
+
       let prompt = "";
-      if (promptMatch) {
-        prompt = promptMatch[1]
+      
+      const ogMatch = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i);
+      if (ogMatch) {
+        prompt = ogMatch[1]
           .replace(/&quot;/g, '"')
           .replace(/&amp;/g, '&')
           .replace(/&lt;/g, '<')
           .replace(/&gt;/g, '>')
           .replace(/&#39;/g, "'");
       } else {
-        const textMatch = html.match(/Create a video[^<]+/i);
+        const textMatch = html.match(/Create a video[^<"]+/i);
         if (textMatch) {
           prompt = textMatch[0].trim();
         }
