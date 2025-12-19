@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -28,6 +28,7 @@ export default function Home() {
   const [videos, setVideos] = useState<SoraVideo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const downloadTimersRef = useRef<NodeJS.Timeout[]>([]);
 
   const processUrls = useCallback(() => {
     const lines = urlInput.split(/[\n\s]+/).filter(line => line.trim());
@@ -120,17 +121,24 @@ export default function Home() {
     });
   }, []);
 
+  const clearDownloadTimers = useCallback(() => {
+    downloadTimersRef.current.forEach(timer => clearTimeout(timer));
+    downloadTimersRef.current = [];
+  }, []);
+
   const handleDownloadAll = useCallback(() => {
+    clearDownloadTimers();
     const toDownload = selectedIds.size > 0 
       ? videos.filter(v => selectedIds.has(v.id))
       : videos;
     
     toDownload.forEach((video, index) => {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         window.open(video.downloadUrl, "_blank");
       }, index * 500);
+      downloadTimersRef.current.push(timer);
     });
-  }, [videos, selectedIds]);
+  }, [videos, selectedIds, clearDownloadTimers]);
 
   const hasVideos = videos.length > 0;
   const allSelected = videos.length > 0 && selectedIds.size === videos.length;
@@ -216,11 +224,15 @@ export default function Home() {
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => setVideos([])}
-                  data-testid="button-add-more"
+                  onClick={() => {
+                    clearDownloadTimers();
+                    setVideos([]);
+                    setSelectedIds(new Set());
+                  }}
+                  data-testid="button-clear-all"
                 >
                   <ArrowLeft className="w-4 h-4 mr-2" />
-                  Add More
+                  Clear All
                 </Button>
 
                 <div className="flex items-center gap-2">
