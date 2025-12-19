@@ -36,30 +36,52 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
 
   return (
     <div 
-      className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border"
+      className="flex items-start gap-3 p-3 rounded-lg bg-card border border-border"
+      style={{ WebkitTransform: 'translateZ(0)' }}
       data-testid={`card-video-${video.id}`}
     >
       <Dialog>
         <DialogTrigger asChild>
           <button 
-            className="relative w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-muted cursor-pointer group"
+            className="relative rounded-md overflow-hidden bg-muted cursor-pointer group"
+            style={{ 
+              width: '64px', 
+              height: '64px', 
+              minWidth: '64px',
+              minHeight: '64px',
+              flexShrink: 0,
+              WebkitTransform: 'translateZ(0)'
+            }}
             data-testid={`button-preview-${video.id}`}
           >
             {!videoError ? (
               <>
                 <video
                   src={video.downloadUrl}
-                  className="w-full h-full object-cover"
+                  className="object-cover"
+                  style={{ 
+                    width: '64px', 
+                    height: '64px',
+                    display: 'block'
+                  }}
                   preload="metadata"
+                  playsInline
+                  muted
                   onError={() => setVideoError(true)}
                   data-testid={`video-thumbnail-${video.id}`}
                 />
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div 
+                  className="absolute inset-0 flex items-center justify-center bg-black/30"
+                  style={{ WebkitTransform: 'translateZ(0)' }}
+                >
                   <Play className="w-6 h-6 text-white" fill="white" />
                 </div>
               </>
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-muted">
+              <div 
+                className="flex items-center justify-center bg-muted"
+                style={{ width: '64px', height: '64px' }}
+              >
                 <span className="text-xs text-muted-foreground">N/A</span>
               </div>
             )}
@@ -69,15 +91,32 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
           <video
             src={video.downloadUrl}
             className="w-full"
+            style={{ display: 'block' }}
             controls
             autoPlay
+            playsInline
             data-testid={`video-fullscreen-${video.id}`}
           />
         </DialogContent>
       </Dialog>
 
-      <div className="flex-1 min-w-0 space-y-1">
-        <p className="text-xs text-muted-foreground font-mono truncate" data-testid={`text-video-id-${video.id}`}>
+      <div 
+        className="space-y-1"
+        style={{ 
+          flex: '1 1 0%', 
+          minWidth: 0,
+          WebkitTransform: 'translateZ(0)'
+        }}
+      >
+        <p 
+          className="text-xs text-muted-foreground font-mono"
+          style={{ 
+            overflow: 'hidden', 
+            textOverflow: 'ellipsis', 
+            whiteSpace: 'nowrap' 
+          }}
+          data-testid={`text-video-id-${video.id}`}
+        >
           ID: {video.videoId}
         </p>
         
@@ -87,7 +126,15 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
             <span>Loading prompt...</span>
           </div>
         ) : truncatedPrompt ? (
-          <p className="text-sm truncate" data-testid={`text-prompt-${video.id}`}>
+          <p 
+            className="text-sm"
+            style={{ 
+              overflow: 'hidden', 
+              textOverflow: 'ellipsis', 
+              whiteSpace: 'nowrap' 
+            }}
+            data-testid={`text-prompt-${video.id}`}
+          >
             {truncatedPrompt}
           </p>
         ) : (
@@ -99,7 +146,6 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
             variant="secondary"
             size="sm"
             onClick={handleCopyPrompt}
-            className="h-7 text-xs"
             data-testid={`button-copy-prompt-${video.id}`}
           >
             {copied ? (
@@ -120,7 +166,7 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
       <Button
         onClick={() => onDownload(video)}
         disabled={videoError}
-        className="flex-shrink-0"
+        style={{ flexShrink: 0 }}
         data-testid={`button-download-${video.id}`}
       >
         <Download className="w-4 h-4 sm:mr-2" />
