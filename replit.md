@@ -2,27 +2,30 @@
 
 ## Overview
 
-A web application for marketing teams to easily download Sora-generated videos. Users paste Sora public links, and the app generates direct download URLs with video previews.
+A mobile-friendly web application for internal marketing team use to download Sora-generated videos. Users paste Sora public links, view video previews with prompts, and download directly to their device.
 
 ## User Preferences
 
-Preferred communication style: Simple, everyday language.
+- Preferred communication style: Simple, everyday language
+- Primary use case: iPhone/mobile usage
+- Internal use only (no onboarding needed)
 
 ## Current Implementation Status
 
 **FULLY FUNCTIONAL** - The application is complete with:
+- Mobile-first responsive design
 - Textarea for pasting multiple Sora URLs
-- Automatic URL transformation (sora.chatgpt.com → oscdn2.dyysy.com)
-- Video preview grid with playback controls
-- Individual and bulk download options
-- Select all / remove functionality
+- Automatic URL transformation with prompt fetching
+- Compact video list with thumbnails, video IDs, and prompts
+- Copy prompt functionality
+- Auto-download to device (via backend proxy with Content-Disposition)
 - Dark/light mode toggle
-- Collapsible instructions panel
-- Auto-paste from clipboard feature
+- Success/failure status display
 
 ### URL Transformation Logic
 - Input: `https://sora.chatgpt.com/p/s_6944b4e29038819187a5eecf46545ba7`
-- Output: `https://oscdn2.dyysy.com/MP4/s_6944b4e29038819187a5eecf46545ba7.mp4`
+- Download: `https://oscdn2.dyysy.com/MP4/s_6944b4e29038819187a5eecf46545ba7.mp4`
+- Prompts are fetched from the Sora page metadata
 
 ## System Architecture
 
@@ -36,25 +39,31 @@ Preferred communication style: Simple, everyday language.
 
 ### Backend Architecture
 - **Runtime**: Node.js with Express
-- **Minimal Backend**: Only serves health check endpoint - all logic is client-side
-- **No Database Required**: URL transformation is stateless
+- **API Endpoints**:
+  - `GET /api/health` - Health check
+  - `GET /api/prompt/:videoId` - Fetch prompt from Sora page
+  - `GET /api/download/:videoId` - Proxy download with Content-Disposition header
 
 ### Key Components
 - **client/src/components/Header.tsx** - App header with theme toggle
-- **client/src/components/VideoCard.tsx** - Individual video preview with download
-- **client/src/pages/Home.tsx** - Main page with URL input and video grid
+- **client/src/components/VideoCard.tsx** - Compact video row with thumbnail, ID, prompt, copy button, download
+- **client/src/pages/Home.tsx** - Main page with URL input and video list
+- **server/routes.ts** - Backend API routes for prompt fetching and download proxy
 - **shared/schema.ts** - SoraVideo interface and URL transformation helpers
 
 ### Key Design Decisions
 
-**Frontend-Only Processing**: All URL transformation happens client-side. No server processing or storage required.
+**Mobile-First Design**: Optimized for iPhone usage with compact, touch-friendly layout.
 
-**Video Preview**: Uses HTML5 video element with the transformed download URL as source.
+**Backend Proxy for Downloads**: Uses Content-Disposition header to force downloads instead of opening in new window.
 
-**Bulk Operations**: Support for select all, remove selected, and download all/selected.
+**Prompt Fetching**: Scrapes Sora page metadata to extract video prompts.
+
+**No Instructions Panel**: Removed for internal use simplicity.
 
 ## Recent Changes
 
+- 2024-12-19: Added mobile-first design, prompt fetching, auto-download
+- 2024-12-19: Removed instructions panel for internal use
+- 2024-12-19: Added backend proxy endpoints
 - 2024-12: Pivoted from watermark removal to Sora video downloader
-- Simplified architecture to frontend-only URL transformation
-- Removed FFmpeg, file upload, and keyframe infrastructure
