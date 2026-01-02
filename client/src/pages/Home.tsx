@@ -105,7 +105,7 @@ export default function Home() {
         <div className="max-w-2xl mx-auto space-y-6">
           <div className="text-center mb-4">
             <h1 className="text-2xl sm:text-3xl font-bold mb-2" data-testid="text-page-title">
-              Sora Bulk Downloader
+              Sora Video Downloader
             </h1>
             <p className="text-sm text-muted-foreground" data-testid="text-page-subtitle">
               Download multiple Sora videos at once. Paste your URLs below to get started.
@@ -114,7 +114,7 @@ export default function Home() {
 
           <div className="space-y-4">
             <Textarea
-              placeholder="https://sora.chatgpt.com/p/s_6944b4e29038819187a5eecf46545ba7"
+              placeholder="Example URL: https://sora.chatgpt.com/p/s_6944b4e29038819187a5eecf46545ba7"
               className="min-h-[140px] font-mono text-sm bg-card border-border resize-none"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
