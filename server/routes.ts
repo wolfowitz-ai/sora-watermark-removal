@@ -87,40 +87,69 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ error: "Invalid video ID" });
     }
 
-    try {
-      const downloadUrl = `https://oscdn2.dyysy.com/MP4/${videoId}.mp4`;
-      const response = await fetch(downloadUrl);
+    const downloadUrl = `https://oscdn2.dyysy.com/MP4/${videoId}.mp4`;
+    const maxRetries = 5;
+    const baseDelay = 2000;
 
-      if (!response.ok) {
-        return res.status(404).json({ error: "Video not found" });
-      }
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await fetch(downloadUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://sora.chatgpt.com/'
+          }
+        });
 
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Content-Disposition", `attachment; filename="${videoId}.mp4"`);
-      
-      const contentLength = response.headers.get("content-length");
-      if (contentLength) {
-        res.setHeader("Content-Length", contentLength);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        return res.status(500).json({ error: "Failed to stream video" });
-      }
-
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
+        if (response.status === 429) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.log(`Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
         }
-        res.end();
-      };
 
-      await pump();
-    } catch (error) {
-      console.error("Error downloading video:", error);
-      res.status(500).json({ error: "Failed to download video" });
+        if (!response.ok) {
+          return res.status(404).json({ error: "Video not found" });
+        }
+
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("video")) {
+          return res.status(502).json({ error: "CDN returned non-video content" });
+        }
+
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Content-Disposition", `attachment; filename="${videoId}.mp4"`);
+        
+        const contentLength = response.headers.get("content-length");
+        if (contentLength) {
+          res.setHeader("Content-Length", contentLength);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          return res.status(500).json({ error: "Failed to stream video" });
+        }
+
+        const pump = async () => {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+          res.end();
+        };
+
+        await pump();
+        return;
+      } catch (error) {
+        console.error(`Download attempt ${attempt + 1} failed:`, error);
+        if (attempt === maxRetries - 1) {
+          return res.status(500).json({ error: "Failed to download video after retries" });
+        }
+      }
     }
+    
+    res.status(500).json({ error: "Failed to download video" });
   });
 }
