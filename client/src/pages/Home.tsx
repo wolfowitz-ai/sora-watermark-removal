@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -6,7 +6,7 @@ import Header from "@/components/Header";
 import VideoCard from "@/components/VideoCard";
 import { Download, Loader2 } from "lucide-react";
 import type { SoraVideo } from "@shared/schema";
-import { extractVideoId, generateDownloadUrl } from "@shared/schema";
+import { extractVideoId } from "@shared/schema";
 
 export default function Home() {
   const { toast } = useToast();
@@ -15,21 +15,27 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [stats, setStats] = useState({ successful: 0, failed: 0 });
 
-  const fetchPrompt = async (videoId: string): Promise<string> => {
+  const fetchVideoInfo = async (originalUrl: string): Promise<{
+    downloadUrl: string;
+    thumbnailUrl: string;
+    title: string;
+    prompt: string;
+  } | null> => {
     try {
-      const response = await fetch(`/api/prompt/${videoId}`);
+      const response = await fetch(`/api/video-info?url=${encodeURIComponent(originalUrl)}`);
       if (response.ok) {
         const data = await response.json();
-        return data.prompt || "";
+        return {
+          downloadUrl: data.mp4 || "",
+          thumbnailUrl: data.thumbnail || "",
+          title: data.title || "",
+          prompt: data.prompt || ""
+        };
       }
     } catch (error) {
-      console.error("Failed to fetch prompt:", error);
+      console.error("Failed to fetch video info:", error);
     }
-    return "";
-  };
-
-  const fetchPromptClientSide = async (url: string): Promise<string> => {
-    return "";
+    return null;
   };
 
   const processUrls = useCallback(async () => {
@@ -49,7 +55,8 @@ export default function Home() {
             id: crypto.randomUUID(),
             videoId,
             originalUrl: trimmedUrl,
-            downloadUrl: generateDownloadUrl(videoId),
+            downloadUrl: "",
+            thumbnailUrl: "",
             isLoading: true,
             addedAt: new Date(),
           });
@@ -66,11 +73,18 @@ export default function Home() {
       setStats({ successful: newVideos.length, failed });
 
       for (const video of newVideos) {
-        const prompt = await fetchPrompt(video.videoId);
-        setVideos(prev => 
-          prev.map(v => 
-            v.id === video.id 
-              ? { ...v, prompt, isLoading: false }
+        const info = await fetchVideoInfo(video.originalUrl);
+        setVideos(prev =>
+          prev.map(v =>
+            v.id === video.id
+              ? {
+                  ...v,
+                  downloadUrl: info?.downloadUrl || "",
+                  thumbnailUrl: info?.thumbnailUrl || "",
+                  title: info?.title || "",
+                  prompt: info?.prompt || "",
+                  isLoading: false
+                }
               : v
           )
         );
@@ -88,7 +102,7 @@ export default function Home() {
 
   const handleDownload = useCallback((video: SoraVideo) => {
     const link = document.createElement("a");
-    link.href = `/api/download/${video.videoId}`;
+    link.href = `/api/download?url=${encodeURIComponent(video.originalUrl)}`;
     link.download = `${video.videoId}.mp4`;
     document.body.appendChild(link);
     link.click();
@@ -100,7 +114,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      
+
       <main className="flex-1 py-6 px-4 sm:px-6">
         <div className="max-w-2xl mx-auto space-y-6">
           <div className="text-center mb-4">
@@ -121,8 +135,8 @@ export default function Home() {
               data-testid="textarea-url-input"
             />
 
-            <Button 
-              className="w-full" 
+            <Button
+              className="w-full"
               size="lg"
               onClick={processUrls}
               disabled={!urlInput.trim() || isProcessing}

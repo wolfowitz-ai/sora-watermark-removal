@@ -24,8 +24,10 @@ A mobile-friendly web application for internal marketing team use to download So
 
 ### URL Transformation Logic
 - Input: `https://sora.chatgpt.com/p/s_6944b4e29038819187a5eecf46545ba7`
-- Download: `https://oscdn2.dyysy.com/MP4/s_6944b4e29038819187a5eecf46545ba7.mp4`
-- Prompts are fetched from the Sora page metadata
+- API lookup: `https://api.dyysy.com/links20260207/${encodedUrl}` returns signed CDN URLs + metadata
+- Download URL: signed `videos-us3.ss2.life` URL (watermark-free, valid ~7 days)
+- Thumbnail URL: separate signed thumbnail URL from same API
+- Prompt/title: returned in `post_info` from same API call (no browser/Puppeteer needed)
 
 ## System Architecture
 
@@ -41,8 +43,8 @@ A mobile-friendly web application for internal marketing team use to download So
 - **Runtime**: Node.js with Express
 - **API Endpoints**:
   - `GET /api/health` - Health check
-  - `GET /api/prompt/:videoId` - Fetch prompt from Sora page
-  - `GET /api/download/:videoId` - Proxy download with Content-Disposition header
+  - `GET /api/video-info?url={encodedUrl}` - Calls dyysy API, returns mp4/thumbnail/title/prompt
+  - `GET /api/download?url={encodedUrl}` - Fetches fresh CDN URL then proxies download with Content-Disposition header
 
 ### Key Components
 - **client/src/components/Header.tsx** - App header with theme toggle

@@ -13,135 +13,130 @@ interface VideoCardProps {
 export default function VideoCard({ video, onDownload }: VideoCardProps) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
-  const [videoError, setVideoError] = useState(false);
+  const [thumbError, setThumbError] = useState(false);
 
   const handleCopyPrompt = async () => {
-    if (!video.prompt) return;
-    
+    const text = video.prompt || video.title;
+    if (!text) return;
+
     try {
-      await navigator.clipboard.writeText(video.prompt);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
-      toast({ title: "Prompt copied!" });
+      toast({ title: "Copied!" });
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast({ title: "Failed to copy", variant: "destructive" });
     }
   };
 
-  const truncatedPrompt = video.prompt 
-    ? video.prompt.length > 60 
-      ? video.prompt.substring(0, 60) + "..." 
-      : video.prompt
+  const displayText = video.prompt || video.title || null;
+  const truncated = displayText
+    ? displayText.length > 80
+      ? displayText.substring(0, 80) + "..."
+      : displayText
     : null;
 
+  const hasVideo = !!video.downloadUrl;
+  const isReady = !video.isLoading && hasVideo;
+
   return (
-    <div 
+    <div
       className="flex items-start gap-3 p-3 rounded-lg bg-card border border-border"
-      style={{ WebkitTransform: 'translateZ(0)' }}
+      style={{ WebkitTransform: "translateZ(0)" }}
       data-testid={`card-video-${video.id}`}
     >
       <Dialog>
-        <DialogTrigger asChild>
-          <button 
+        <DialogTrigger asChild disabled={!isReady}>
+          <button
             className="relative rounded-md overflow-hidden bg-muted cursor-pointer group"
-            style={{ 
-              width: '64px', 
-              height: '64px', 
-              minWidth: '64px',
-              minHeight: '64px',
+            style={{
+              width: "64px",
+              height: "64px",
+              minWidth: "64px",
+              minHeight: "64px",
               flexShrink: 0,
-              WebkitTransform: 'translateZ(0)'
+              WebkitTransform: "translateZ(0)"
             }}
+            disabled={!isReady}
             data-testid={`button-preview-${video.id}`}
           >
-            {!videoError ? (
+            {video.isLoading ? (
+              <div className="flex items-center justify-center w-full h-full">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : !thumbError && video.thumbnailUrl ? (
               <>
-                <video
-                  src={video.downloadUrl}
+                <img
+                  src={video.thumbnailUrl}
+                  alt="Video thumbnail"
                   className="object-cover"
-                  style={{ 
-                    width: '64px', 
-                    height: '64px',
-                    display: 'block'
-                  }}
-                  preload="metadata"
-                  playsInline
-                  muted
-                  onError={() => setVideoError(true)}
-                  data-testid={`video-thumbnail-${video.id}`}
+                  style={{ width: "64px", height: "64px", display: "block" }}
+                  onError={() => setThumbError(true)}
+                  data-testid={`img-thumbnail-${video.id}`}
                 />
-                <div 
+                <div
                   className="absolute inset-0 flex items-center justify-center bg-black/30"
-                  style={{ WebkitTransform: 'translateZ(0)' }}
+                  style={{ WebkitTransform: "translateZ(0)" }}
                 >
                   <Play className="w-6 h-6 text-white" fill="white" />
                 </div>
               </>
             ) : (
-              <div 
-                className="flex items-center justify-center bg-muted"
-                style={{ width: '64px', height: '64px' }}
-              >
+              <div className="flex items-center justify-center bg-muted w-full h-full">
                 <span className="text-xs text-muted-foreground">N/A</span>
               </div>
             )}
           </button>
         </DialogTrigger>
-        <DialogContent className="max-w-3xl p-0 overflow-hidden">
-          <video
-            src={video.downloadUrl}
-            className="w-full"
-            style={{ display: 'block' }}
-            controls
-            autoPlay
-            playsInline
-            data-testid={`video-fullscreen-${video.id}`}
-          />
-        </DialogContent>
+        {isReady && (
+          <DialogContent className="max-w-3xl p-0 overflow-hidden">
+            <video
+              src={video.downloadUrl}
+              className="w-full"
+              style={{ display: "block" }}
+              controls
+              autoPlay
+              playsInline
+              data-testid={`video-fullscreen-${video.id}`}
+            />
+          </DialogContent>
+        )}
       </Dialog>
 
-      <div 
+      <div
         className="space-y-1"
-        style={{ 
-          flex: '1 1 0%', 
+        style={{
+          flex: "1 1 0%",
           minWidth: 0,
-          WebkitTransform: 'translateZ(0)'
+          WebkitTransform: "translateZ(0)"
         }}
       >
-        <p 
+        <p
           className="text-xs text-muted-foreground font-mono"
-          style={{ 
-            overflow: 'hidden', 
-            textOverflow: 'ellipsis', 
-            whiteSpace: 'nowrap' 
-          }}
+          style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           data-testid={`text-video-id-${video.id}`}
         >
           ID: {video.videoId}
         </p>
-        
+
         {video.isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="w-3 h-3 animate-spin" />
-            <span>Loading prompt...</span>
+            <span>Loading info...</span>
           </div>
-        ) : truncatedPrompt ? (
-          <p 
+        ) : truncated ? (
+          <p
             className="text-sm"
-            style={{ 
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
-              whiteSpace: 'nowrap' 
-            }}
+            style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             data-testid={`text-prompt-${video.id}`}
           >
-            {truncatedPrompt}
+            {truncated}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground italic">No prompt available</p>
+          <p className="text-sm text-muted-foreground italic">No info available</p>
         )}
 
-        {video.prompt && !video.isLoading && (
+        {displayText && !video.isLoading && (
           <Button
             variant="secondary"
             size="sm"
@@ -165,7 +160,7 @@ export default function VideoCard({ video, onDownload }: VideoCardProps) {
 
       <Button
         onClick={() => onDownload(video)}
-        disabled={videoError}
+        disabled={!isReady}
         style={{ flexShrink: 0 }}
         data-testid={`button-download-${video.id}`}
       >
